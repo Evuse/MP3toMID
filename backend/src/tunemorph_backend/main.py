@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import __version__
 from .api import router
 from .config import get_settings
+from .database import create_schema
 from .schemas import HealthResponse
 
 
@@ -15,6 +16,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     settings.model_cache_dir.mkdir(parents=True, exist_ok=True)
+    await create_schema()
     yield
 
 

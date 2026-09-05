@@ -14,6 +14,8 @@ export default function Home() {
   const inputId = useId();
   const [file, setFile] = useState<File | null>(null);
   const [selectedStyle, setSelectedStyle] = useState("Music Box");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
 
   const choose = (candidate?: File) => {
     if (candidate) setFile(candidate);
@@ -24,6 +26,46 @@ export default function Home() {
   };
   const change = (event: ChangeEvent<HTMLInputElement>) =>
     choose(event.target.files?.[0]);
+
+  const upload = async () => {
+    if (!file || busy) return;
+    setBusy(true);
+    setMessage("Creating your private project…");
+    const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    const style = selectedStyle
+      .toLowerCase()
+      .replaceAll(" ", "_")
+      .replace("8-bit", "eight_bit");
+    try {
+      const created = await fetch(`${api}/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ style }),
+      });
+      if (!created.ok) throw new Error("Unable to create the project.");
+      const project = (await created.json()) as { id: string };
+      setMessage("Uploading and validating audio…");
+      const form = new FormData();
+      form.append("audio", file);
+      const response = await fetch(`${api}/api/projects/${project.id}/audio`, {
+        method: "POST",
+        body: form,
+      });
+      if (!response.ok) {
+        const problem = (await response.json()) as { detail?: string };
+        throw new Error(problem.detail ?? "The audio could not be uploaded.");
+      }
+      setMessage(
+        "Audio validated. Your project is ready for analysis in the next phase.",
+      );
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : "Unexpected upload error.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <main className="mx-auto min-h-screen max-w-6xl px-5 pb-16 pt-6 sm:px-8">
@@ -44,7 +86,7 @@ export default function Home() {
           TuneMorph
         </a>
         <span className="rounded-full border border-white/10 px-3 py-1 text-xs text-white/60">
-          Milestone 01
+          Milestone 02
         </span>
       </nav>
 
@@ -142,15 +184,18 @@ export default function Home() {
 
       <div className="flex flex-col items-center border-t border-white/10 pt-10 text-center">
         <button
-          disabled
-          className="rounded-full bg-lilac px-8 py-3.5 font-semibold text-ink opacity-50"
-          title="Enabled with the upload pipeline milestone"
+          disabled={!file || busy}
+          onClick={upload}
+          className="rounded-full bg-lilac px-8 py-3.5 font-semibold text-ink transition hover:bg-white disabled:cursor-not-allowed disabled:opacity-40"
         >
-          Create arrangement
+          {busy ? "Uploading…" : "Create project"}
         </button>
-        <p className="mt-3 text-xs text-white/40">
-          Processing becomes available with the upload pipeline. No fake
-          conversion is performed.
+        <p
+          className="mt-3 min-h-5 text-xs text-white/50"
+          role="status"
+          aria-live="polite"
+        >
+          {message ?? "Audio is streamed to a private UUID-isolated project."}
         </p>
       </div>
       <footer className="mx-auto mt-20 max-w-2xl text-center text-xs leading-5 text-white/35">

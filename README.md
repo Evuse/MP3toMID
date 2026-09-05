@@ -5,10 +5,11 @@ style-aware MIDI arrangements. It deliberately targets recognisable musical
 reinterpretation rather than promising perfect note-for-note transcription of arbitrary
 polyphonic recordings.
 
-This first milestone establishes the production-oriented monorepo, FastAPI service,
-replaceable audio-engine contracts, responsive Next.js interface, tests, and Docker
-development environment. Audio processing is intentionally implemented in subsequent
-pipeline milestones rather than represented here by fake progress or mock conversion.
+The first two milestones establish the production-oriented monorepo, FastAPI service,
+private UUID project storage, streamed and decoded audio uploads, replaceable audio-engine
+contracts, responsive Next.js interface, tests, and Docker development environment. Audio
+analysis and conversion are implemented in subsequent pipeline milestones rather than
+represented here by fake progress or mock conversion.
 
 ## Repository layout
 
@@ -72,10 +73,14 @@ cd frontend && npm run lint && npm run typecheck && npm run format:check
 
 - `GET /health` — liveness and service version
 - `GET /api/styles` — stable metadata for built-in style plugins
+- `POST /api/projects` — create a private UUID project
+- `POST /api/projects/{id}/audio` — stream, limit and decode-validate an audio upload
+- `GET /api/projects/{id}` and `GET /api/projects/{id}/status` — project state
+- `DELETE /api/projects/{id}` — remove database records and private artifacts
 - Interactive OpenAPI — `/docs`; machine-readable schema — `/openapi.json`
 
-Project, upload, job, result, and download endpoints are introduced with the processing
-pipeline. See [the architecture document](docs/architecture.md) for their planned shape.
+Processing, result, and download endpoints are introduced with the processing pipeline.
+See [the architecture document](docs/architecture.md) for their planned shape.
 
 ## Models, preview rendering, and limitations
 
@@ -88,8 +93,8 @@ FluidSynth will be the preferred local MIDI renderer. Install it through your op
 system and set `PREVIEW_SOUNDFONT` to a legally obtained General MIDI SoundFont. TuneMorph
 does not bundle a dedicated music-box SoundFont.
 
-At this milestone the upload interface is demonstrative and does not send files: this is
-made explicit in the UI. There is no fabricated job progress or placeholder MIDI output.
+The UI creates a project and uploads audio to the API. It reports only actual request and
+validation states; there is no fabricated processing progress or placeholder MIDI output.
 
 ## Licensing notes
 
