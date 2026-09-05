@@ -1,8 +1,9 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from pydantic import Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -18,7 +19,10 @@ class Settings(BaseSettings):
     model_cache_dir: Path = Path("data/models")
     preview_soundfont: Path | None = None
     processing_mode: str = "fast"
-    backend_cors_origins: tuple[str, ...] = ("http://localhost:3000",)
+    backend_cors_origins: Annotated[tuple[str, ...], NoDecode] = (
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    )
 
     @field_validator("processing_mode")
     @classmethod

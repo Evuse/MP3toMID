@@ -53,9 +53,10 @@ Open <http://localhost:3000>; API docs are at <http://localhost:8000/docs>.
 ## Docker
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
+
+Copying `.env.example` to `.env` is optional; all development defaults work without it.
 
 The source tree is mounted for development. Project data is retained in the named
 `tunemorph-data` volume and is never served as a public static directory.
@@ -95,6 +96,24 @@ does not bundle a dedicated music-box SoundFont.
 
 The UI creates a project and uploads audio to the API. It reports only actual request and
 validation states; there is no fabricated processing progress or placeholder MIDI output.
+
+## Troubleshooting
+
+### Upload reports that the project cannot be created
+
+The browser sends API calls to the Next.js same-origin `/backend/*` proxy. In local
+development, start the API on port 8000 before the frontend. Docker configures the proxy
+to use the `backend` service automatically. For a different API address, set
+`BACKEND_INTERNAL_URL` in the frontend process; do not use a Docker-only hostname in a
+browser-facing variable.
+
+```bash
+curl http://localhost:8000/health
+curl http://localhost:3000/backend/health
+```
+
+Both calls should return `{"status":"ok",...}`. If the first fails, start Uvicorn. If
+only the second fails, restart Next.js after changing `BACKEND_INTERNAL_URL`.
 
 ## Licensing notes
 

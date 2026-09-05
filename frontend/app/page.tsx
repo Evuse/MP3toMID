@@ -31,7 +31,9 @@ export default function Home() {
     if (!file || busy) return;
     setBusy(true);
     setMessage("Creating your private project…");
-    const api = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+    // Same-origin requests are proxied by Next.js, avoiding browser CORS and
+    // Docker hostname differences while keeping the backend storage private.
+    const api = "/backend";
     const style = selectedStyle
       .toLowerCase()
       .replaceAll(" ", "_")
@@ -42,7 +44,11 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ style }),
       });
-      if (!created.ok) throw new Error("Unable to create the project.");
+      if (!created.ok) {
+        throw new Error(
+          "Unable to create the project. Check that the backend is running.",
+        );
+      }
       const project = (await created.json()) as { id: string };
       setMessage("Uploading and validating audio…");
       const form = new FormData();

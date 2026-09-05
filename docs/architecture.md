@@ -9,7 +9,8 @@ stack today and PostgreSQL, S3, and a distributed queue later without rewriting 
 
 ```mermaid
 flowchart LR
-  UI[Next.js UI] -->|REST / OpenAPI| API[FastAPI]
+  UI[Browser UI] -->|same-origin /backend proxy| Next[Next.js]
+  Next -->|REST / OpenAPI| API[FastAPI]
   API --> DB[(SQLite / PostgreSQL)]
   API --> Queue[Job abstraction]
   Queue --> Validation[Validate + decode]
