@@ -25,7 +25,7 @@ represented here by fake progress or mock conversion.
 
 ## Prerequisites
 
-- Python 3.12+
+- Python 3.11+
 - Node.js 20+
 - `ffmpeg`/`ffprobe` (required by the processing milestone)
 - Docker Compose (optional)
@@ -34,11 +34,13 @@ represented here by fake progress or mock conversion.
 
 ```bash
 cp .env.example .env
-python -m venv .venv
-source .venv/bin/activate
-pip install -e './audio-engine[dev]' -e './backend[dev]'
-uvicorn tunemorph_backend.main:app --reload --port 8000
+make setup
+make backend
 ```
+
+`make setup` creates `.venv` and installs both local Python packages in editable mode.
+Using `make backend` deliberately invokes `.venv/bin/python -m uvicorn`, so macOS cannot
+accidentally execute a globally installed `uvicorn` with the wrong interpreter.
 
 In another terminal:
 
@@ -114,6 +116,26 @@ curl http://localhost:3000/backend/health
 
 Both calls should return `{"status":"ok",...}`. If the first fails, start Uvicorn. If
 only the second fails, restart Next.js after changing `BACKEND_INTERNAL_URL`.
+
+### `ModuleNotFoundError: No module named 'tunemorph_backend'`
+
+This means Uvicorn is running with a Python interpreter where the local backend package
+was not installed. On macOS, the path in the traceback often reveals a global Uvicorn
+(for example `/Library/Frameworks/Python.framework/...`) even though the prompt displays
+`(.venv)`. From the repository root, repair the environment and start the exact venv
+interpreter:
+
+```bash
+make setup
+make backend
+```
+
+To verify the interpreter manually:
+
+```bash
+.venv/bin/python -c "import sys, tunemorph_backend; print(sys.executable)"
+.venv/bin/python -m uvicorn tunemorph_backend.main:app --reload --port 8000
+```
 
 ## Licensing notes
 
