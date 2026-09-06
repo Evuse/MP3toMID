@@ -55,3 +55,9 @@ class StatusResponse(BaseModel):
     status: ProjectStatus
     progress: int
     error: str | None
+
+
+class ProcessResponse(BaseModel):
+    project_id: str
+    job_id: str
+    status: ProjectStatus

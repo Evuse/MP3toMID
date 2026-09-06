@@ -85,18 +85,24 @@ cd frontend && npm run lint && npm run typecheck && npm run format:check
 - `POST /api/projects` — create a private UUID project
 - `POST /api/projects/{id}/audio` — stream, limit and decode-validate an audio upload
 - `GET /api/projects/{id}` and `GET /api/projects/{id}/status` — project state
+- `POST /api/projects/{id}/process` — enqueue analysis, transcription, styling and rendering
+- `GET /api/projects/{id}/analysis` — detected BPM, key, duration and note count
+- `GET /api/projects/{id}/midi` — download the transformed Standard MIDI File
+- `GET /api/projects/{id}/preview` — play or download the synthesized WAV preview
 - `DELETE /api/projects/{id}` — remove database records and private artifacts
 - Interactive OpenAPI — `/docs`; machine-readable schema — `/openapi.json`
 
-Processing, result, and download endpoints are introduced with the processing pipeline.
-See [the architecture document](docs/architecture.md) for their planned shape.
+The processing request runs in a bounded local background executor and reports real stage
+boundaries. The queue interface can later be replaced by a distributed worker.
 
 ## Models, preview rendering, and limitations
 
-The engine uses explicit adapter interfaces, so source separation, transcription,
-analysis, and rendering are not coupled to one vendor or model. No large model weights
-or copyrighted recordings are distributed. A later milestone can enable Demucs under
-its own terms and fall back to the fast pipeline when separation is unavailable.
+The working FAST engine uses librosa onset and dominant-pitch analysis to create a
+recognisable melodic MIDI reduction, applies quantization, transpose, range, density and
+polyphony transformations, and renders a deterministic synthesized WAV preview. This is
+not a note-perfect transcription of dense polyphonic audio. The explicit adapter
+interfaces allow a model-backed transcriber and Demucs separation to replace this path
+without changing the API. No model weights or copyrighted recordings are distributed.
 
 FluidSynth will be the preferred local MIDI renderer. Install it through your operating
 system and set `PREVIEW_SOUNDFONT` to a legally obtained General MIDI SoundFont. TuneMorph

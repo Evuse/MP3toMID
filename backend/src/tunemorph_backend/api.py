@@ -10,8 +10,9 @@ from sqlalchemy.orm import selectinload
 from .audio_validation import InvalidAudioError, probe_audio
 from .config import Settings, get_settings
 from .database import get_session
-from .models import AudioFile, Project, ProjectStatus
-from .schemas import ProjectCreate, ProjectResponse, StatusResponse, StyleSummary
+from .models import AudioFile, ProcessingJob, Project, ProjectStatus
+from .processor import job_queue
+from .schemas import ProcessResponse, ProjectCreate, ProjectResponse, StatusResponse, StyleSummary
 from .storage import LocalProjectStorage, ProjectStorage, UploadTooLargeError
 
 router = APIRouter(prefix="/api")
@@ -127,10 +128,89 @@ async def get_project_status(
     project_id: str, session: AsyncSession = Depends(get_session)
 ) -> StatusResponse:
     project = await find_project(project_id, session)
-    progress = 5 if project.status == ProjectStatus.uploading else 0
+    job = await session.scalar(
+        select(ProcessingJob)
+        .where(ProcessingJob.project_id == project_id)
+        .order_by(ProcessingJob.created_at.desc())
+    )
+    progress = job.progress if job else (5 if project.status == ProjectStatus.uploading else 0)
     return StatusResponse(
         project_id=project.id, status=project.status, progress=progress, error=project.error
     )
+
+
+@router.post(
+    "/projects/{project_id}/process",
+    response_model=ProcessResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    tags=["processing"],
+)
+async def start_processing(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+) -> ProcessResponse:
+    project = await find_project(project_id, session)
+    if project.audio_file is None:
+        raise HTTPException(status_code=409, detail="Upload audio before processing")
+    if project.status not in {ProjectStatus.pending, ProjectStatus.failed}:
+        raise HTTPException(status_code=409, detail="Project is already processing")
+    project.error = None
+    project.status = ProjectStatus.analyzing
+    job = ProcessingJob(project_id=project.id, status=ProjectStatus.analyzing, progress=10)
+    session.add(job)
+    await session.commit()
+    await session.refresh(job)
+    job_queue.enqueue(project.id, job.id, settings.data_dir)
+    return ProcessResponse(project_id=project.id, job_id=job.id, status=job.status)
+
+
+@router.get("/projects/{project_id}/analysis", tags=["processing"])
+async def get_analysis(project_id: str, session: AsyncSession = Depends(get_session)) -> dict:
+    project = await find_project(project_id, session)
+    if project.analysis is None:
+        raise HTTPException(status_code=404, detail="Analysis is not available yet")
+    return project.analysis
+
+
+async def result_file(
+    project_id: str, kind: str, session: AsyncSession, storage: ProjectStorage
+) -> FileResponse:
+    project = await session.scalar(
+        select(Project).where(Project.id == project_id).options(selectinload(Project.result))
+    )
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    key = getattr(project.result, f"{kind}_storage_key", None) if project.result else None
+    if not key or not storage.resolve(key).is_file():
+        raise HTTPException(status_code=404, detail=f"{kind.title()} is not available yet")
+    suffix = ".mid" if kind == "midi" else ".wav"
+    media = "audio/midi" if kind == "midi" else "audio/wav"
+    disposition = "attachment" if kind == "midi" else "inline"
+    return FileResponse(
+        storage.resolve(key),
+        media_type=media,
+        filename=f"tunemorph_{project.style}{suffix}",
+        content_disposition_type=disposition,
+    )
+
+
+@router.get("/projects/{project_id}/midi", response_class=FileResponse, tags=["processing"])
+async def download_midi(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    storage: ProjectStorage = Depends(get_storage),
+) -> FileResponse:
+    return await result_file(project_id, "midi", session, storage)
+
+
+@router.get("/projects/{project_id}/preview", response_class=FileResponse, tags=["processing"])
+async def get_preview(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    storage: ProjectStorage = Depends(get_storage),
+) -> FileResponse:
+    return await result_file(project_id, "preview", session, storage)
 
 
 @router.post("/projects/{project_id}/audio", response_model=ProjectResponse, tags=["projects"])

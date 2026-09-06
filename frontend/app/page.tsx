@@ -44,6 +44,12 @@ type Settings = {
   max_polyphony: number;
   include_drums: boolean;
 };
+type Analysis = {
+  bpm: number;
+  key: string;
+  note_count: number;
+  duration_seconds: number;
+};
 
 const defaults: Settings = {
   fidelity: 75,
@@ -65,11 +71,15 @@ export default function Home() {
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
 
   const choose = (candidate?: File) => {
     if (!candidate) return;
     setFile(candidate);
     setProjectId(null);
+    setProgress(0);
+    setAnalysis(null);
     setError(false);
     setMessage(`${candidate.name} is ready to upload.`);
   };
@@ -116,9 +126,16 @@ export default function Home() {
         throw new Error(problem.detail ?? "The audio could not be uploaded.");
       }
       setProjectId(project.id);
-      setMessage(
-        "Upload complete. Audio was decoded and validated successfully.",
+      setMessage("Starting musical analysis…");
+      const processing = await fetch(
+        `/backend/api/projects/${project.id}/process`,
+        {
+          method: "POST",
+        },
       );
+      if (!processing.ok)
+        throw new Error("The processing job could not be started.");
+      await waitForResult(project.id);
     } catch (reason) {
       if (createdId) {
         await fetch(`/backend/api/projects/${createdId}`, {
@@ -132,6 +149,33 @@ export default function Home() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const waitForResult = async (id: string) => {
+    for (let attempt = 0; attempt < 240; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const response = await fetch(`/backend/api/projects/${id}/status`, {
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("Could not read processing status.");
+      const state = (await response.json()) as {
+        status: string;
+        progress: number;
+        error?: string;
+      };
+      setProgress(state.progress);
+      setMessage(stageLabel(state.status));
+      if (state.status === "failed")
+        throw new Error(state.error || "Audio processing failed.");
+      if (state.status === "completed") {
+        const details = await fetch(`/backend/api/projects/${id}/analysis`);
+        if (!details.ok) throw new Error("Analysis result is missing.");
+        setAnalysis((await details.json()) as Analysis);
+        setMessage("Your styled MIDI arrangement is ready.");
+        return;
+      }
+    }
+    throw new Error("Processing timed out. Try a shorter audio file.");
   };
 
   return (
@@ -367,6 +411,21 @@ export default function Home() {
           {message ??
             "Select a file, choose a style, then create your private project."}
         </p>
+        {busy && progress > 0 && (
+          <div
+            className="mt-4 h-2 w-full max-w-md overflow-hidden rounded-full bg-white/10"
+            role="progressbar"
+            aria-label="Arrangement progress"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={progress}
+          >
+            <div
+              className="h-full rounded-full bg-lilac transition-all"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        )}
       </div>
 
       {projectId && (
@@ -375,10 +434,12 @@ export default function Home() {
           aria-labelledby="ready-title"
         >
           <p className="text-xs font-semibold uppercase tracking-[.2em] text-emerald-300">
-            Validated
+            {analysis ? "Arrangement ready" : "Original validated"}
           </p>
           <h2 id="ready-title" className="mt-2 text-xl font-medium">
-            Project created successfully
+            {analysis
+              ? "Your transformation is complete"
+              : "Processing your arrangement"}
           </h2>
           <p className="mt-2 text-sm text-white/55">
             Private project <code>{projectId}</code>
@@ -391,6 +452,55 @@ export default function Home() {
           >
             Your browser does not support audio playback.
           </audio>
+          {analysis && (
+            <div className="mt-6 border-t border-white/10 pt-6">
+              <dl className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
+                <div>
+                  <dt className="text-white/40">BPM</dt>
+                  <dd className="mt-1 font-medium">{analysis.bpm}</dd>
+                </div>
+                <div>
+                  <dt className="text-white/40">Key</dt>
+                  <dd className="mt-1 font-medium">{analysis.key}</dd>
+                </div>
+                <div>
+                  <dt className="text-white/40">Notes</dt>
+                  <dd className="mt-1 font-medium">{analysis.note_count}</dd>
+                </div>
+                <div>
+                  <dt className="text-white/40">Duration</dt>
+                  <dd className="mt-1 font-medium">
+                    {analysis.duration_seconds.toFixed(1)}s
+                  </dd>
+                </div>
+              </dl>
+              <h3 className="mt-6 text-sm font-medium">Styled preview</h3>
+              <audio
+                className="mt-3 w-full"
+                controls
+                preload="metadata"
+                src={`/backend/api/projects/${projectId}/preview`}
+              >
+                Your browser does not support audio playback.
+              </audio>
+              <div className="mt-5 flex flex-wrap gap-3">
+                <a
+                  className="rounded-full bg-lilac px-5 py-2.5 text-sm font-semibold text-ink hover:bg-white"
+                  href={`/backend/api/projects/${projectId}/midi`}
+                  download
+                >
+                  Download MIDI
+                </a>
+                <a
+                  className="rounded-full border border-white/20 px-5 py-2.5 text-sm font-semibold hover:border-white/50"
+                  href={`/backend/api/projects/${projectId}/preview`}
+                  download
+                >
+                  Download audio preview
+                </a>
+              </div>
+            </div>
+          )}
         </section>
       )}
 
@@ -400,6 +510,18 @@ export default function Home() {
       </footer>
     </main>
   );
+}
+
+function stageLabel(stage: string) {
+  const labels: Record<string, string> = {
+    analyzing: "Analyzing tempo and key…",
+    transcribing: "Detecting notes…",
+    post_processing: "Cleaning MIDI…",
+    styling: "Applying the selected style…",
+    rendering: "Rendering the audio preview…",
+    completed: "Arrangement complete.",
+  };
+  return labels[stage] ?? "Processing…";
 }
 
 function Range({
