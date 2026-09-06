@@ -1,0 +1,27 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    environment:
+      DATA_DIR: /app/data
+      DATABASE_URL: sqlite+aiosqlite:////app/data/tunemorph.db
+    ports: ["8000:8000"]
+    volumes:
+      - tunemorph-data:/app/data
+      - ./backend:/app/backend
+      - ./audio-engine:/app/audio-engine
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    environment:
+      BACKEND_INTERNAL_URL: http://backend:8000
+    ports: ["3000:3000"]
+    volumes:
+      - ./frontend:/app
+      - frontend-modules:/app/node_modules
+    depends_on: [backend]
+volumes:
+  tunemorph-data:
+  frontend-modules:
