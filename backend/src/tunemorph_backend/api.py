@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -184,6 +185,31 @@ async def upload_audio(
     await session.refresh(project, attribute_names=["audio_file"])
     write_metadata(storage, project)
     return project
+
+
+@router.get(
+    "/projects/{project_id}/audio",
+    response_class=FileResponse,
+    responses={200: {"content": {"audio/mpeg": {}, "audio/wav": {}, "audio/flac": {}}}},
+    tags=["projects"],
+)
+async def get_original_audio(
+    project_id: str,
+    session: AsyncSession = Depends(get_session),
+    storage: ProjectStorage = Depends(get_storage),
+) -> FileResponse:
+    project = await find_project(project_id, session)
+    if project.audio_file is None:
+        raise HTTPException(status_code=404, detail="Project has no audio file")
+    path = storage.resolve(project.audio_file.storage_key)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Audio artifact not found")
+    return FileResponse(
+        path,
+        media_type=project.audio_file.media_type,
+        filename=project.original_filename or f"audio{path.suffix}",
+        content_disposition_type="inline",
+    )
 
 
 @router.delete("/projects/{project_id}", status_code=status.HTTP_204_NO_CONTENT, tags=["projects"])

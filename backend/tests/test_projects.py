@@ -35,6 +35,11 @@ def test_project_upload_and_delete() -> None:
         assert source.is_file()
         assert (source.parents[1] / "metadata.json").is_file()
 
+        playback = client.get(f"/api/projects/{project_id}/audio")
+        assert playback.status_code == 200
+        assert playback.headers["content-type"].startswith("audio/wav")
+        assert playback.content == wav_bytes()
+
         status = client.get(f"/api/projects/{project_id}/status")
         assert status.json()["status"] == "pending"
         assert client.delete(f"/api/projects/{project_id}").status_code == 204

@@ -27,7 +27,7 @@ represented here by fake progress or mock conversion.
 
 - Python 3.11+
 - Node.js 20+
-- `ffmpeg`/`ffprobe` (required by the processing milestone)
+- `ffmpeg`/`ffprobe` (required now to validate MP3, M4A and FLAC; WAV uses a native decoder)
 - Docker Compose (optional)
 
 ## Local development
@@ -41,6 +41,12 @@ make backend
 `make setup` creates `.venv` and installs both local Python packages in editable mode.
 Using `make backend` deliberately invokes `.venv/bin/python -m uvicorn`, so macOS cannot
 accidentally execute a globally installed `uvicorn` with the wrong interpreter.
+
+On macOS, install the decoder used for MP3 validation once:
+
+```bash
+brew install ffmpeg
+```
 
 In another terminal:
 
@@ -98,6 +104,9 @@ does not bundle a dedicated music-box SoundFont.
 
 The UI creates a project and uploads audio to the API. It reports only actual request and
 validation states; there is no fabricated processing progress or placeholder MIDI output.
+Style cards have an explicit selected state, Advanced Settings exposes real controls whose
+values are persisted with the project, and a successful upload displays an original-audio
+player backed by the private project endpoint.
 
 ## Troubleshooting
 
