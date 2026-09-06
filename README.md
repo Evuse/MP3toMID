@@ -97,12 +97,13 @@ boundaries. The queue interface can later be replaced by a distributed worker.
 
 ## Models, preview rendering, and limitations
 
-The working FAST engine uses librosa onset and dominant-pitch analysis to create a
-recognisable melodic MIDI reduction, applies quantization, transpose, range, density and
-polyphony transformations, and renders a deterministic synthesized WAV preview. This is
-not a note-perfect transcription of dense polyphonic audio. The explicit adapter
-interfaces allow a model-backed transcriber and Demucs separation to replace this path
-without changing the API. No model weights or copyrighted recordings are distributed.
+The working FAST engine uses NumPy/SciPy spectral, onset-energy and dominant-pitch
+analysis to create a recognisable melodic MIDI reduction, applies quantization,
+transpose, range, density and polyphony transformations, and renders a deterministic
+synthesized WAV preview. It intentionally avoids Numba/LLVM, so setup works with standard
+Python 3.11–3.14 installations on macOS. This is not a note-perfect transcription of dense
+polyphonic audio. The explicit adapters allow a model-backed transcriber and Demucs
+separation to replace this path without changing the API.
 
 FluidSynth will be the preferred local MIDI renderer. Install it through your operating
 system and set `PREVIEW_SOUNDFONT` to a legally obtained General MIDI SoundFont. TuneMorph
@@ -156,7 +157,8 @@ To verify the interpreter manually:
 
 The project code is offered under the MIT license. Principal dependencies are isolated
 behind application or engine boundaries: FastAPI (MIT), Pydantic (MIT), Uvicorn (BSD-3),
-Next.js (MIT), React (MIT), Tailwind CSS (MIT), SQLAlchemy (MIT), and pytest (MIT).
+Next.js (MIT), React (MIT), Tailwind CSS (MIT), SQLAlchemy (MIT), NumPy (BSD-3), SciPy
+(BSD-3), SoundFile (BSD-3), Mido (MIT), and pytest (MIT).
 FFmpeg and FluidSynth licensing depends on the installed build; operators must verify
 their distribution configuration. Optional ML adapters and model weights must be reviewed
 independently before production distribution.

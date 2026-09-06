@@ -8,10 +8,11 @@ replace it through the contracts module.
 from dataclasses import dataclass
 from pathlib import Path
 
-import librosa
 import mido
 import numpy as np
+import soundfile as sf
 from scipy.io import wavfile
+from scipy.signal import resample_poly
 
 from .models import AudioAnalysis, ProcessingParameters
 
@@ -27,20 +28,59 @@ class Note:
 KEY_NAMES = ("C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B")
 
 
+def _load_audio(path: Path, target_rate: int = 22_050) -> tuple[np.ndarray, int]:
+    audio, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+    audio = np.mean(audio, axis=1)
+    if sample_rate != target_rate:
+        divisor = int(np.gcd(sample_rate, target_rate))
+        audio = resample_poly(audio, target_rate // divisor, sample_rate // divisor)
+    return np.asarray(audio, dtype=np.float32), target_rate
+
+
+def _frames(audio: np.ndarray, size: int = 2048, hop: int = 512) -> np.ndarray:
+    if audio.size < size:
+        audio = np.pad(audio, (0, size - audio.size))
+    count = 1 + (audio.size - size) // hop
+    return np.lib.stride_tricks.sliding_window_view(audio, size)[::hop][:count]
+
+
+def _estimate_tempo(audio: np.ndarray, sample_rate: int) -> float:
+    hop = 512
+    framed = _frames(audio, hop=hop)
+    energy = np.sqrt(np.mean(framed * framed, axis=1))
+    onset = np.maximum(0, np.diff(energy, prepend=energy[0]))
+    onset -= np.mean(onset)
+    correlation = np.correlate(onset, onset, mode="full")[onset.size - 1 :]
+    minimum_lag = max(1, round(60 * sample_rate / hop / 220))
+    maximum_lag = min(correlation.size, round(60 * sample_rate / hop / 40))
+    if maximum_lag <= minimum_lag or np.max(correlation[minimum_lag:maximum_lag]) <= 1e-9:
+        return 120.0
+    lag = minimum_lag + int(np.argmax(correlation[minimum_lag:maximum_lag]))
+    return float(np.clip(60 * sample_rate / hop / lag, 40, 220))
+
+
+def _chroma_profile(audio: np.ndarray, sample_rate: int) -> np.ndarray:
+    framed = _frames(audio) * np.hanning(2048)
+    spectrum = np.abs(np.fft.rfft(framed, axis=1))
+    frequencies = np.fft.rfftfreq(2048, 1 / sample_rate)
+    valid = frequencies >= 32.7
+    midi = np.rint(69 + 12 * np.log2(frequencies[valid] / 440)).astype(int)
+    profile = np.zeros(12)
+    for pitch_class in range(12):
+        profile[pitch_class] = float(np.sum(spectrum[:, valid][:, midi % 12 == pitch_class]))
+    return profile
+
+
 def analyze_audio(path: Path) -> tuple[AudioAnalysis, np.ndarray, int]:
-    audio, sample_rate = librosa.load(path, sr=22_050, mono=True)
+    audio, sample_rate = _load_audio(path)
     if audio.size == 0:
         raise ValueError("Decoded audio is empty")
-    tempo, _ = librosa.beat.beat_track(y=audio, sr=sample_rate)
-    bpm = float(np.asarray(tempo).reshape(-1)[0]) if np.asarray(tempo).size else 120.0
-    if not np.isfinite(bpm) or bpm <= 0:
-        bpm = 120.0
-    chroma = librosa.feature.chroma_cqt(y=audio, sr=sample_rate)
-    profile = np.mean(chroma, axis=1)
+    bpm = _estimate_tempo(audio, sample_rate)
+    profile = _chroma_profile(audio, sample_rate)
     tonic = int(np.argmax(profile))
     confidence = float(profile[tonic] / max(float(np.sum(profile)), 1e-9))
     analysis = AudioAnalysis(
-        duration_seconds=float(librosa.get_duration(y=audio, sr=sample_rate)),
+        duration_seconds=float(audio.size / sample_rate),
         bpm=round(bpm, 2),
         key=f"{KEY_NAMES[tonic]} major/minor",
         confidence=round(min(confidence * 4, 1.0), 3),
@@ -50,35 +90,42 @@ def analyze_audio(path: Path) -> tuple[AudioAnalysis, np.ndarray, int]:
 
 def transcribe_dominant_pitch(audio: np.ndarray, sample_rate: int, bpm: float) -> list[Note]:
     hop = 512
-    pitches, magnitudes = librosa.piptrack(
-        y=audio,
-        sr=sample_rate,
-        hop_length=hop,
-        fmin=librosa.note_to_hz("C2"),
-        fmax=librosa.note_to_hz("C7"),
-    )
-    onset_frames = librosa.onset.onset_detect(
-        y=audio, sr=sample_rate, hop_length=hop, backtrack=True
-    )
-    boundaries = sorted({0, *map(int, onset_frames), pitches.shape[1]})
+    framed = _frames(audio, hop=hop)
+    windowed = framed * np.hanning(framed.shape[1])
+    magnitudes = np.abs(np.fft.rfft(windowed, axis=1))
+    frequencies = np.fft.rfftfreq(framed.shape[1], 1 / sample_rate)
+    allowed = (frequencies >= 65.4) & (frequencies <= 2093)
+    selected = magnitudes[:, allowed]
+    peak_bins = np.argmax(selected, axis=1)
+    peak_strength = selected[np.arange(selected.shape[0]), peak_bins]
+    peak_frequency = frequencies[allowed][peak_bins]
+    midi_pitch = np.rint(69 + 12 * np.log2(peak_frequency / 440)).astype(int)
+    rms = np.sqrt(np.mean(framed * framed, axis=1))
+    voiced = rms > max(float(np.max(rms)) * 0.08, 1e-5)
+    boundaries = [0]
+    for index in range(1, len(midi_pitch)):
+        if (
+            voiced[index] != voiced[index - 1]
+            or abs(midi_pitch[index] - midi_pitch[index - 1]) >= 1
+        ):
+            boundaries.append(index)
+    boundaries.append(len(midi_pitch))
     minimum = 60.0 / bpm / 8.0
     notes: list[Note] = []
     for left, right in zip(boundaries, boundaries[1:], strict=False):
         if right <= left:
             continue
-        region = magnitudes[:, left:right]
-        flat_index = int(np.argmax(region))
-        row, column = np.unravel_index(flat_index, region.shape)
-        frequency = float(pitches[row, left + column])
-        strength = float(region[row, column])
-        if frequency <= 0 or strength < np.percentile(magnitudes, 70):
+        if not np.any(voiced[left:right]):
             continue
-        start = float(librosa.frames_to_time(left, sr=sample_rate, hop_length=hop))
-        end = float(librosa.frames_to_time(right, sr=sample_rate, hop_length=hop))
+        pitch = int(np.clip(round(float(np.median(midi_pitch[left:right]))), 36, 96))
+        strength = float(np.max(peak_strength[left:right]))
+        start = left * hop / sample_rate
+        end = min(audio.size / sample_rate, (right * hop + framed.shape[1]) / sample_rate)
         if end - start < minimum:
             continue
-        pitch = int(np.clip(round(librosa.hz_to_midi(frequency)), 36, 96))
-        velocity = int(np.clip(55 + 45 * strength / max(float(np.max(magnitudes)), 1e-9), 45, 105))
+        velocity = int(
+            np.clip(55 + 45 * strength / max(float(np.max(peak_strength)), 1e-9), 45, 105)
+        )
         if notes and notes[-1].pitch == pitch and start - notes[-1].end < 0.04:
             notes[-1].end = end
         else:
